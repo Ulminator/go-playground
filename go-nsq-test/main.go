@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +12,18 @@ import (
 
 	"github.com/nsqio/go-nsq"
 )
+
+func testPublish(id int, errorChan chan<- error, producer *nsq.Producer, topic string, messageBody []byte, timeout int) {
+	// fmt.Println(fmt.Sprintf("%d: Publishing message", id))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
+	defer cancel()
+	err := producer.PublishV2(ctx, topic, messageBody)
+	if err == nil {
+		fmt.Println(fmt.Sprintf("%d: Published message", id))
+	}
+	wrappedErr := fmt.Errorf("%d: %w", id, err)
+	errorChan <- wrappedErr
+}
 
 func publish(nsqdHost string, topic string, message string, timeout int) {
 	// Instantiate a producer.
@@ -22,22 +35,21 @@ func publish(nsqdHost string, topic string, message string, timeout int) {
 
 	messageBody := []byte(message)
 
-	// // REMOVE
-	// producer.Ping()
-	// fmt.Println("Enter message to publish:")
-	// scanner := bufio.NewScanner(os.Stdin)
-	// scanner.Scan()
-	// //
-
-	// Synchronously publish a single message to the specified topic.
-	// Messages can also be sent asynchronously and/or in batches.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
-	defer cancel()
-	err = producer.PublishV2(ctx, topic, messageBody)
-	if err != nil {
-		log.Fatal(err)
+	count := 2
+	errorChan := make(chan error, 1)
+	for i := 0; i < count; i++ {
+		go func(id int) {
+			testPublish(id, errorChan, producer, topic, messageBody, timeout)
+		}(i)
 	}
 
+	for i := 0; i < count; i++ {
+		err := <-errorChan
+		if err != nil {
+			fmt.Println("Error publishing message:", err)
+		}
+
+	}
 	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
 	producer.Stop()
 }
