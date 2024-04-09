@@ -12,7 +12,7 @@ import (
 	"github.com/nsqio/go-nsq"
 )
 
-func publish(nsqdHost string, topic string, message string) {
+func publish(nsqdHost string, topic string, message string, timeout int) {
 	// Instantiate a producer.
 	config := nsq.NewConfig()
 	producer, err := nsq.NewProducer(nsqdHost, config)
@@ -31,35 +31,7 @@ func publish(nsqdHost string, topic string, message string) {
 
 	// Synchronously publish a single message to the specified topic.
 	// Messages can also be sent asynchronously and/or in batches.
-	err = producer.Publish(topic, messageBody)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
-	producer.Stop()
-}
-
-func publishV2(nsqdHost string, topic string, message string) {
-	// Instantiate a producer.
-	config := nsq.NewConfig()
-	producer, err := nsq.NewProducer(nsqdHost, config)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	messageBody := []byte(message)
-
-	// // REMOVE
-	// producer.Ping()
-	// fmt.Println("Enter message to publish:")
-	// scanner := bufio.NewScanner(os.Stdin)
-	// scanner.Scan()
-	// //
-
-	// Synchronously publish a single message to the specified topic.
-	// Messages can also be sent asynchronously and/or in batches.
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
 	defer cancel()
 	err = producer.PublishV2(ctx, topic, messageBody)
 	if err != nil {
@@ -105,6 +77,7 @@ func main() {
 	nsqdHostFlag := flag.String("nsqd-host", "127.0.0.1:4150", "nsqd host")
 	nsqlookupdHostFlag := flag.String("nsqlookupd-host", "127.0.0.1:4161", "nsqlookupd host")
 	messageFlag := flag.String("message", "hello", "message to publish")
+	timeoutFlag := flag.Int("timeout", 1000, "timeout in microseconds")
 	flag.Parse()
 
 	if *publishFlag && *consumeFlag {
@@ -116,8 +89,7 @@ func main() {
 	}
 
 	if *publishFlag {
-		// publish(*nsqdHostFlag, *topicFlag, *messageFlag)
-		publishV2(*nsqdHostFlag, *topicFlag, *messageFlag)
+		publish(*nsqdHostFlag, *topicFlag, *messageFlag, *timeoutFlag)
 	} else {
 		consume(*nsqlookupdHostFlag, *topicFlag, *channelFlag)
 	}
