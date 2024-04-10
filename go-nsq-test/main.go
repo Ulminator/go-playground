@@ -58,6 +58,7 @@ func publish(nsqdHost string, topic string, message string, timeout int, count i
 		} else {
 			fmt.Println("Error publishing message:", err)
 		}
+		fmt.Println("----------------")
 	}
 	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
 	producer.Stop()
