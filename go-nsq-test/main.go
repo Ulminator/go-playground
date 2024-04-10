@@ -49,17 +49,18 @@ func publish(nsqdHost string, topic string, message string, timeout int, count i
 	// 	}
 
 	// }
+	success := 0
 	for i := 0; i < count; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
 		defer cancel()
 		err := producer.PublishV2(ctx, topic, messageBody)
-		if err == nil {
-			fmt.Println("Published message")
-		} else {
-			fmt.Println("Error publishing message:", err)
+		if err != nil {
+			fmt.Println("#", i, "err:", err)
+			continue
 		}
-		fmt.Println("----------------")
+		success++
 	}
+	fmt.Println("Published", success, "messages")
 	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
 	producer.Stop()
 }
