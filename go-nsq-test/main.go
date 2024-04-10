@@ -25,7 +25,7 @@ func testPublish(id int, errorChan chan<- error, producer *nsq.Producer, topic s
 	errorChan <- wrappedErr
 }
 
-func publish(nsqdHost string, topic string, message string, timeout int) {
+func publish(nsqdHost string, topic string, message string, timeout int, count int) {
 	// Instantiate a producer.
 	config := nsq.NewConfig()
 	producer, err := nsq.NewProducer(nsqdHost, config)
@@ -35,20 +35,29 @@ func publish(nsqdHost string, topic string, message string, timeout int) {
 
 	messageBody := []byte(message)
 
-	count := 2
-	errorChan := make(chan error, 1)
-	for i := 0; i < count; i++ {
-		go func(id int) {
-			testPublish(id, errorChan, producer, topic, messageBody, timeout)
-		}(i)
-	}
+	// errorChan := make(chan error, 1)
+	// for i := 0; i < count; i++ {
+	// 	go func(id int) {
+	// 		testPublish(id, errorChan, producer, topic, messageBody, timeout)
+	// 	}(i)
+	// }
 
+	// for i := 0; i < count; i++ {
+	// 	err := <-errorChan
+	// 	if err != nil {
+	// 		fmt.Println("Error publishing message:", err)
+	// 	}
+
+	// }
 	for i := 0; i < count; i++ {
-		err := <-errorChan
-		if err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
+		defer cancel()
+		err := producer.PublishV2(ctx, topic, messageBody)
+		if err == nil {
+			fmt.Println("Published message")
+		} else {
 			fmt.Println("Error publishing message:", err)
 		}
-
 	}
 	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
 	producer.Stop()
@@ -90,7 +99,12 @@ func main() {
 	nsqlookupdHostFlag := flag.String("nsqlookupd-host", "127.0.0.1:4161", "nsqlookupd host")
 	messageFlag := flag.String("message", "hello", "message to publish")
 	timeoutFlag := flag.Int("timeout", 1000, "timeout in microseconds")
+	messageCountFlag := flag.Int("message-count", 1, "number of messages to publish")
 	flag.Parse()
+
+	// cfg := nsq.NewConfig()
+	// fmt.Println("ReadTimeout:", cfg.ReadTimeout)
+	// fmt.Println("WriteTimeout:", cfg.WriteTimeout)
 
 	if *publishFlag && *consumeFlag {
 		log.Fatal("Cannot publish and consume at the same time")
@@ -101,7 +115,7 @@ func main() {
 	}
 
 	if *publishFlag {
-		publish(*nsqdHostFlag, *topicFlag, *messageFlag, *timeoutFlag)
+		publish(*nsqdHostFlag, *topicFlag, *messageFlag, *timeoutFlag, *messageCountFlag)
 	} else {
 		consume(*nsqlookupdHostFlag, *topicFlag, *channelFlag)
 	}
