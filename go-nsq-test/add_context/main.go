@@ -13,19 +13,7 @@ import (
 	"github.com/nsqio/go-nsq"
 )
 
-func testPublish(id int, errorChan chan<- error, producer *nsq.Producer, topic string, messageBody []byte, timeout int) {
-	// fmt.Println(fmt.Sprintf("%d: Publishing message", id))
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
-	defer cancel()
-	err := producer.PublishV2(ctx, topic, messageBody)
-	if err == nil {
-		fmt.Println(fmt.Sprintf("%d: Published message", id))
-	}
-	wrappedErr := fmt.Errorf("%d: %w", id, err)
-	errorChan <- wrappedErr
-}
-
-func publish(nsqdHost string, topic string, message string, timeout int, count int) {
+func initProducer(nsqdHost string) *nsq.Producer {
 	// Instantiate a producer.
 	config := nsq.NewConfig()
 	producer, err := nsq.NewProducer(nsqdHost, config)
@@ -33,27 +21,20 @@ func publish(nsqdHost string, topic string, message string, timeout int, count i
 		log.Fatal(err)
 	}
 
-	messageBody := []byte(message)
+	producer.Ping()
 
-	// errorChan := make(chan error, 1)
-	// for i := 0; i < count; i++ {
-	// 	go func(id int) {
-	// 		testPublish(id, errorChan, producer, topic, messageBody, timeout)
-	// 	}(i)
-	// }
+	return producer
+}
 
-	// for i := 0; i < count; i++ {
-	// 	err := <-errorChan
-	// 	if err != nil {
-	// 		fmt.Println("Error publishing message:", err)
-	// 	}
+func publish(nsqdHost string, topic string, timeout int, count int) {
+	producer := initProducer(nsqdHost)
 
-	// }
 	success := 0
 	for i := 0; i < count; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
 		defer cancel()
-		err := producer.PublishV2(ctx, topic, messageBody)
+		message := []byte(fmt.Sprintf("message #%d", i))
+		err := producer.PublishWithContext(ctx, topic, message)
 		if err != nil {
 			fmt.Println("#", i, "err:", err)
 			continue
@@ -61,6 +42,77 @@ func publish(nsqdHost string, topic string, message string, timeout int, count i
 		success++
 	}
 	fmt.Println("Published", success, "messages")
+
+	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
+	producer.Stop()
+}
+
+func publishAsync(nsqdHost string, topic string, timeout int, count int) {
+	producer := initProducer(nsqdHost)
+
+	success := 0
+	for i := 0; i < count; i++ {
+		doneChan := make(chan *nsq.ProducerTransaction)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
+		defer cancel()
+		message := []byte(fmt.Sprintf("message #%d", i))
+		err := producer.PublishAsyncWithContext(ctx, topic, message, doneChan)
+		if err != nil {
+			close(doneChan)
+			fmt.Println("#", i, "err:", err)
+			continue
+		}
+		t := <-doneChan
+		fmt.Println("waited")
+		if t.Error != nil {
+			fmt.Println("#", i, "err:", t.Error)
+			continue
+		}
+		success++
+	}
+	fmt.Println("Published", success, "messages")
+
+	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
+	producer.Stop()
+}
+
+func multiPublish(nsqdHost string, topic string, timeout int, count int) {
+	producer := initProducer(nsqdHost)
+
+	messages := make([][]byte, count)
+	for i := 0; i < count; i++ {
+		messages[i] = []byte(fmt.Sprintf("message #%d", i))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
+	defer cancel()
+	err := producer.MultiPublishWithContext(ctx, topic, messages)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
+	producer.Stop()
+}
+
+func deferredPublish(nsqdHost string, topic string, timeout int, count int) {
+	producer := initProducer(nsqdHost)
+
+	success := 0
+	for i := 0; i < count; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Microsecond)
+		defer cancel()
+		message := []byte(fmt.Sprintf("message #%d", i))
+		delay := time.Duration(1) * time.Second
+		err := producer.DeferredPublishWithContext(ctx, topic, delay, message)
+		if err != nil {
+			fmt.Println("#", i, "err:", err)
+			continue
+		}
+		success++
+	}
+	fmt.Println("Published", success, "messages")
+
 	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
 	producer.Stop()
 }
@@ -99,14 +151,9 @@ func main() {
 	channelFlag := flag.String("channel", "matt-test-channel", "channel name")
 	nsqdHostFlag := flag.String("nsqd-host", "127.0.0.1:4150", "nsqd host")
 	nsqlookupdHostFlag := flag.String("nsqlookupd-host", "127.0.0.1:4161", "nsqlookupd host")
-	messageFlag := flag.String("message", "hello", "message to publish")
 	timeoutFlag := flag.Int("timeout", 1000, "timeout in microseconds")
-	messageCountFlag := flag.Int("message-count", 1, "number of messages to publish")
+	countFlag := flag.Int("count", 1, "number of messages to publish")
 	flag.Parse()
-
-	// cfg := nsq.NewConfig()
-	// fmt.Println("ReadTimeout:", cfg.ReadTimeout)
-	// fmt.Println("WriteTimeout:", cfg.WriteTimeout)
 
 	if *publishFlag && *consumeFlag {
 		log.Fatal("Cannot publish and consume at the same time")
@@ -117,7 +164,10 @@ func main() {
 	}
 
 	if *publishFlag {
-		publish(*nsqdHostFlag, *topicFlag, *messageFlag, *timeoutFlag, *messageCountFlag)
+		// publish(*nsqdHostFlag, *topicFlag, *timeoutFlag, *countFlag)
+		publishAsync(*nsqdHostFlag, *topicFlag, *timeoutFlag, *countFlag)
+		// multiPublish(*nsqdHostFlag, *topicFlag, *timeoutFlag, *countFlag)
+		// deferredPublish(*nsqdHostFlag, *topicFlag, *timeoutFlag, *countFlag)
 	} else {
 		consume(*nsqlookupdHostFlag, *topicFlag, *channelFlag)
 	}
